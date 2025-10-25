@@ -33,6 +33,7 @@
             --color-slate-900-rgb: 19, 52, 59;
             --color-slate-500-rgb: 98, 108, 113;
             --color-red-500-rgb: 192, 21, 47;
+            --color-orange-500-rgb: 168, 75, 47;
             --color-bg-1: rgba(59, 130, 246, 0.08);
             --color-bg-2: rgba(245, 158, 11, 0.08);
             --color-background: var(--color-cream-50);
@@ -91,6 +92,7 @@
                 --color-teal-300-rgb: 50, 184, 198;
                 --color-gray-300-rgb: 167, 169, 169;
                 --color-gray-200-rgb: 245, 245, 245;
+                --color-orange-400-rgb: 230, 129, 97;
                 --color-background: var(--color-charcoal-700);
                 --color-surface: var(--color-charcoal-800);
                 --color-text: var(--color-gray-200);
@@ -304,6 +306,18 @@
             background-color: rgba(var(--color-red-500-rgb), 0.15);
             color: var(--color-error);
             border: 1px solid rgba(var(--color-red-500-rgb), 0.25);
+        }
+
+        .alert-warning {
+            background-color: rgba(var(--color-orange-500-rgb), 0.15);
+            color: var(--color-orange-500);
+            border: 1px solid rgba(var(--color-orange-500-rgb), 0.25);
+        }
+
+        .alert-info {
+            background-color: rgba(var(--color-slate-500-rgb), 0.15);
+            color: var(--color-slate-500);
+            border: 1px solid rgba(var(--color-slate-500-rgb), 0.25);
         }
 
         .alert.hidden {
@@ -573,7 +587,77 @@
     </div>
 
     <script>
-        // In-memory data storage
+        /*
+        ============================================
+        GOOGLE SHEETS INTEGRATION SETUP
+        ============================================
+        
+        STEP 1: Create a Google Sheet
+        - Go to https://sheets.google.com
+        - Create a new spreadsheet
+        - Name it "Tech Fest Inquiries" or similar
+        - Add headers in Row 1: Timestamp | Name | Phone | Product | Size | Follow-up Method | Notes
+        
+        STEP 2: Create Google Apps Script
+        - In your Google Sheet, click Extensions > Apps Script
+        - Delete any existing code
+        - Copy and paste this code:
+        
+        function doPost(e) {
+          try {
+            const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+            const data = JSON.parse(e.postData.contents);
+            
+            sheet.appendRow([
+              data.timestamp,
+              data.name,
+              data.phone,
+              data.product,
+              data.size,
+              data.followupMethod,
+              data.notes
+            ]);
+            
+            return ContentService.createTextOutput(JSON.stringify({
+              status: 'success',
+              message: 'Data saved successfully'
+            })).setMimeType(ContentService.MimeType.JSON);
+          } catch (error) {
+            return ContentService.createTextOutput(JSON.stringify({
+              status: 'error',
+              message: error.toString()
+            })).setMimeType(ContentService.MimeType.JSON);
+          }
+        }
+        
+        STEP 3: Deploy the Apps Script
+        - Click the "Deploy" button (top right)
+        - Select "New deployment"
+        - Click the gear icon next to "Select type" and choose "Web app"
+        - Set the following:
+          * Description: "Tech Fest Inquiry Form"
+          * Execute as: "Me"
+          * Who has access: "Anyone"
+        - Click "Deploy"
+        - Copy the Web App URL (it will look like: https://script.google.com/macros/s/...../exec)
+        - Click "Done"
+        
+        STEP 4: Add the URL below
+        - Paste your Web App URL in the GOOGLE_APPS_SCRIPT_URL variable below
+        - Save this file and deploy to Vercel
+        
+        STEP 5: Test the integration
+        - Submit a test inquiry through the form
+        - Check your Google Sheet for the new row
+        - The data will also be stored locally for backup
+        
+        ============================================
+        */
+        
+        // ⚠️ PASTE YOUR GOOGLE APPS SCRIPT WEB APP URL HERE ⚠️
+        const GOOGLE_APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwvlaIUJG4JbEIj1nDQ7JUXDm3VOnqg6F8ZK9QuKMWPkH-s7-3sYeYQj9JuVMyG126p2A/exec'; // Example: 'https://script.google.com/macros/s/AKfycbx.../exec'
+        
+        // In-memory data storage (backup storage)
         let inquiries = [];
 
         // DOM elements
@@ -604,7 +688,7 @@
         }
 
         // Form submission
-        form.addEventListener('submit', function(e) {
+        form.addEventListener('submit', async function(e) {
             e.preventDefault();
             
             // Clear previous errors
@@ -647,7 +731,24 @@
                 return;
             }
 
+            // Disable submit button during submission
+            const submitBtn = form.querySelector('button[type="submit"]');
+            const originalBtnText = submitBtn.textContent;
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Submitting...';
+
+            // Show loading message
+            showAlert('Submitting your inquiry...', 'info');
+
             // Create inquiry object
+            const timestamp = new Date().toLocaleString('en-IN', {
+                day: '2-digit',
+                month: 'short',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+
             const inquiry = {
                 id: Date.now(),
                 customerName,
@@ -656,27 +757,75 @@
                 size: size || 'N/A',
                 followupMethod,
                 notes: notes || 'N/A',
-                timestamp: new Date().toLocaleString('en-IN', {
-                    day: '2-digit',
-                    month: 'short',
-                    year: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                })
+                timestamp
             };
 
-            // Add to inquiries array
-            inquiries.push(inquiry);
+            // Prepare data for Google Sheets
+            const sheetData = {
+                timestamp,
+                name: customerName,
+                phone: phoneNumber,
+                product: productName,
+                size: size || 'N/A',
+                followupMethod,
+                notes: notes || 'N/A'
+            };
 
-            // Reset form
-            form.reset();
+            try {
+                // Send to Google Sheets if URL is configured
+                if (GOOGLE_APPS_SCRIPT_URL) {
+                    const response = await fetch(GOOGLE_APPS_SCRIPT_URL, {
+                        method: 'POST',
+                        mode: 'no-cors', // Required for Google Apps Script
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(sheetData)
+                    });
 
-            // Show success message
-            showAlert('Thank you! Your inquiry has been submitted successfully. We will contact you soon.');
-            scrollToTop();
+                    // Note: With 'no-cors', we can't read the response
+                    // But the data will still be sent to Google Sheets
+                    console.log('Data sent to Google Sheets');
+                } else {
+                    console.warn('Google Apps Script URL not configured. Data stored locally only.');
+                }
 
-            // Update table
-            updateTable();
+                // Add to local storage (backup)
+                inquiries.push(inquiry);
+
+                // Reset form
+                form.reset();
+
+                // Re-enable submit button
+                submitBtn.disabled = false;
+                submitBtn.textContent = originalBtnText;
+
+                // Show success message
+                const successMsg = GOOGLE_APPS_SCRIPT_URL 
+                    ? 'Thank you! Your inquiry has been submitted successfully and saved to Google Sheets. We will contact you soon.' 
+                    : 'Thank you! Your inquiry has been saved locally. (Note: Google Sheets integration not configured)';
+                showAlert(successMsg, 'success');
+                scrollToTop();
+
+                // Update table
+                updateTable();
+
+            } catch (error) {
+                console.error('Error submitting form:', error);
+                
+                // Still save locally even if Google Sheets fails
+                inquiries.push(inquiry);
+                form.reset();
+                updateTable();
+                
+                // Re-enable submit button
+                submitBtn.disabled = false;
+                submitBtn.textContent = originalBtnText;
+
+                // Show error message with local backup confirmation
+                showAlert('Your inquiry has been saved locally, but there was an issue with Google Sheets. Please inform the staff.', 'warning');
+                scrollToTop();
+            }
         });
 
         // Toggle admin panel
